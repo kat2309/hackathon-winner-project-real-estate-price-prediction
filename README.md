@@ -1,3 +1,4 @@
+ 🧪 Built with: **R**, **Power BI**, and **RMarkdown**
 # 🏡 Ames Housing Price Prediction – Hackathon Winning Project
 
 This repository contains the code and output of a predictive modeling project developed for the BU Hackathon 2025. Our team won 1st place for designing a robust classification model to predict whether the sale price of a house would be above or below the median, using over 80 features from the Ames housing dataset.
