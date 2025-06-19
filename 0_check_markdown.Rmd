@@ -1,0 +1,139 @@
+---
+title: "0_check_markdown"
+author: "Mingrui Du"
+date: "2024-10-25"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(pacman)
+pacman::p_load(ggplot2, tidyverse, dplyr, AmesHousing, reshape2, rstanarm, viridis)
+```
+
+## Load data
+
+```{r}
+data <- AmesHousing::make_ames() 
+```
+
+### New Features
+
+```{r}
+# to avoid right-skewed sale price
+data$lg_SalePrice <- log(data$Sale_Price)
+# Total Area
+data$total_area <- rowSums(data[, 
+                                c("First_Flr_SF", "Second_Flr_SF", "Garage_Area")])
+data$year_gap <- data$Year_Sold - data$Year_Built
+```
+
+
+## Feasibility Analysis
+
+### Completeness
+
+No missingness in the dataset. 
+
+```{r}
+column_types <- data.frame(sapply(data, class))
+column_types$unique <- sapply(data, function(x) length(unique(x)))
+#write.csv(column_types, "D:/0-BU MSSP/jobs/Event/hackathon 2024/variable_area.csv")
+missing_counts <- sapply(data, function(x) mean(is.na(x)))
+#print(missing_counts)
+```
+
+## Initial Visualizations
+
+### Histograms
+
+```{r, warning=FALSE}
+df_long <- melt(data)
+
+ggplot(df_long, aes(x = value)) +
+  geom_histogram(bins = 30, fill = "steelblue", color = "black") +
+  facet_wrap(~ variable, scales = "free") +
+  labs(title = "Histograms of All Variables", x = "Value", y = "Frequency") +
+  theme_minimal()
+```
+
+
+### scatterplots vs Sale_Price
+```{r}
+df_long_price <- melt(data, id.vars = "lg_SalePrice")
+
+variables <- unique(df_long_price$variable)
+n <- length(variables)
+group_size <- ceiling(n / 5)  
+
+for (i in 1:5) {
+  group_vars <- variables[((i - 1) * group_size + 1):min(i * group_size, n)]
+  data_subset <- subset(df_long_price, variable %in% group_vars)
+  p <- ggplot(data_subset, aes(x = value, y = lg_SalePrice)) +
+    geom_point(alpha = 0.6, color = "steelblue") +
+    facet_wrap(~ variable, scales = "free_x") +
+    labs(title = paste("Scatter Plots of Variables (Group", i, ") vs. lg_SalePrice"),
+         x = "Variable Value", y = "lg_SalePrice") +
+    theme_minimal()
+  print(p)
+}
+```
+
+### Correlation Map
+
+```{r}
+#Numeric
+data_numeric <- data %>% select_if(is.numeric)
+
+corr_mat <- round(cor(data_numeric, use = "pairwise.complete.obs"), 2)
+melted_corr_mat <- melted_corr_mat[
+  as.numeric(melted_corr_mat$Var1) <= as.numeric(melted_corr_mat$Var2), ]
+
+ggplot(data = melted_corr_mat, aes(x = Var1, y = Var2, fill = value)) + 
+  geom_tile() + 
+  scale_fill_viridis_c(option = "C") +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 6),
+    axis.text.y = element_text(size = 6),
+    axis.title = element_text(size = 10),
+    plot.margin = margin(5, 5, 5, 5, "mm")
+  ) + ggtitle("Correlation Heatmap of Numeric Variables")
+  labs(x = NULL, y = NULL) 
+```
+```{r, warning = FALSE}
+# Categorical
+cat_vars <- data %>% select_if(is.factor)
+chi_sq_p_value <- function(x, y) {
+  tbl <- table(x, y)
+  test <- chisq.test(tbl)
+  return(test$p.value)
+}
+n <- ncol(cat_vars)
+p_value_matrix <- matrix(NA, n, n)
+colnames(p_value_matrix) <- colnames(cat_vars)
+rownames(p_value_matrix) <- colnames(cat_vars)
+for (i in 1:n) {
+  for (j in i:n) {
+    if (i == j) {
+      p_value_matrix[i, j] <- NA  
+    } else {
+      p_value_matrix[i, j] <- chi_sq_p_value(cat_vars[[i]], cat_vars[[j]])
+      
+    }
+  }
+}
+
+melted_p_mtx <- melt(p_value_matrix, na.rm = TRUE)
+ggplot(data = melted_p_mtx, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient(low = "blue", high = "red", name = "p-value") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 6),
+    axis.text.y = element_text(size = 6),
+    axis.title = element_blank()
+  ) +
+  ggtitle("Chi-Square Test p-value Matrix")
+```
+

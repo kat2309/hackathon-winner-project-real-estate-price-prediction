@@ -1,0 +1,251 @@
+---
+title: "1_modelling"
+author: "Mingrui Du"
+date: "2024-10-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(pacman)
+pacman::p_load(ggplot2, tidyverse, dplyr, AmesHousing, reshape2, rstanarm, viridis, lme4)
+```
+
+## Load Data
+
+```{r}
+data <- AmesHousing::make_ames()
+# to avoid right-skewed sale price
+data$lg_SalePrice <- log(data$Sale_Price)
+# Total Area
+data$total_area <- rowSums(data[, 
+                                c("First_Flr_SF", "Second_Flr_SF", "Garage_Area")])
+# Years gap
+data$year_gap <- data$Year_Sold - data$Year_Built
+```
+
+
+## Split Train/Test
+
+```{r}
+set.seed(123)
+train_indices <- sample(1:nrow(data), size = 0.8 * nrow(data))
+df_train <- data[train_indices, ]
+df_test <- data[-train_indices, ]
+```
+
+
+## Linear models
+
+### Null model
+
+```{r}
+null_model <- lm(Sale_Price ~ 1, data = df_train)
+summary(null_model)
+```
+```{r}
+pred <- predict(null_model, newdata = df_test)
+resid <- resid(null_model)  
+mse <- mean((pred - df_test$Sale_Price) ^ 2)
+plot(fitted(null_model), resid) 
+abline(0,0) 
+```
+
+## Model
+
+```{r}
+model_1 <- glm(Sale_Price ~ Utilities + Bsmt_Cond + Bsmt_Exposure + 
+                  Bsmt_Qual + BsmtFin_Type_1 + BsmtFin_Type_2 + 
+                  Central_Air + Enclosed_Porch + Exter_Cond + 
+                  Exter_Qual + Exterior_1st + Exterior_2nd + Fence + 
+                  Fireplace_Qu + Foundation + Garage_Cond + Garage_Finish + 
+                  Garage_Qual + Garage_Type + Heating_QC + House_Style + 
+                  Kitchen_Qual + Lot_Config + Lot_Shape + Mas_Vnr_Area + 
+                  Mas_Vnr_Type + MS_SubClass + MS_Zoning + Neighborhood + 
+                  Paved_Drive + Roof_Style + Sale_Condition + Sale_Type + 
+                  Year_Built + 
+                  Year_Remod_Add + BsmtFin_SF_1 + Fireplaces + 
+                  First_Flr_SF + Full_Bath + Garage_Area + Garage_Cars + 
+                  Half_Bath + Kitchen_AbvGr + Longitude + 
+                  Total_Bsmt_SF + TotRms_AbvGrd + year_gap + total_area, 
+               family = "gaussian",
+                data = df_train)
+summary(model_1)
+```
+
+
+### Residual plot model 1
+
+```{r}
+pred <- predict(model_1, newdata = df_test)
+resid <- resid(model_1)  
+mse_1 <- mean((pred - df_test$Sale_Price) ^ 2)
+plot(fitted(model_1), resid) 
+abline(0,0) 
+```
+```{r}
+selected_vars <- c("Sale_Price", "Utilities", "Bsmt_Cond", "Bsmt_Exposure", 
+                   "Bsmt_Qual", "BsmtFin_Type_1", "BsmtFin_Type_2", 
+                   "Central_Air", "Enclosed_Porch", "Exter_Cond", 
+                   "Exter_Qual", "Exterior_1st", "Exterior_2nd", "Fence", 
+                   "Fireplace_Qu", "Foundation", "Garage_Cond", "Garage_Finish", 
+                   "Garage_Qual", "Garage_Type", "Heating_QC", "House_Style", 
+                   "Kitchen_Qual", "Lot_Config", "Lot_Shape", "Mas_Vnr_Area", 
+                   "Mas_Vnr_Type", "MS_SubClass", "MS_Zoning", "Neighborhood", 
+                   "Paved_Drive", "Roof_Style", "Sale_Condition", "Sale_Type", 
+                   "Year_Built", "Year_Remod_Add", "BsmtFin_SF_1", "Fireplaces", 
+                   "First_Flr_SF", "Full_Bath", "Garage_Area", "Garage_Cars", 
+                   "Half_Bath", "Kitchen_AbvGr", "Longitude", "Total_Bsmt_SF", 
+                   "TotRms_AbvGrd", "year_gap", "total_area", "Mo_Sold", "lg_SalePrice")
+df_sl_train <- subset(df_train, select = selected_vars)
+df_sl_test <- subset(df_test, select = selected_vars)
+df_sl <- subset(data, select = selected_vars)
+```
+
+
+```{r}
+data_numeric <- df_sl %>% select_if(is.numeric)
+
+corr_mat <- round(cor(data_numeric, use = "pairwise.complete.obs"), 2)
+melted_corr_mat <- melted_corr_mat[
+  as.numeric(melted_corr_mat$Var1) <= as.numeric(melted_corr_mat$Var2), ]
+
+ggplot(data = melted_corr_mat, aes(x = Var1, y = Var2, fill = value)) + 
+  geom_tile() + 
+  scale_fill_viridis_c() +
+  theme(
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1, size = 6),
+    axis.text.y = element_text(size = 6),
+    axis.title = element_text(size = 10),
+    plot.margin = margin(5, 5, 5, 5, "mm")
+  ) +
+  labs(x = NULL, y = NULL) 
+```
+```{r}
+# Pre-process: re scale
+first_flr_mean <- mean(df_sl_train$First_Flr_SF)
+first_flr_sd <- sd(df_sl_train$First_Flr_SF)
+
+garage_area_mean <- mean(df_sl_train$Garage_Area)
+garage_area_sd <- sd(df_sl_train$Garage_Area)
+
+total_area_mean <- mean(df_sl_train$total_area)
+total_area_sd <- sd(df_sl_train$total_area)
+
+df_sl_train$First_Flr_SF <- scale(df_sl_train$First_Flr_SF)
+df_sl_train$Garage_Area <- scale(df_sl_train$Garage_Area)
+df_sl_train$total_area <- scale(df_sl_train$total_area)
+
+df_sl_test$First_Flr_SF <- (df_sl_test$First_Flr_SF - first_flr_mean) / first_flr_sd
+df_sl_test$Garage_Area <- (df_sl_test$Garage_Area - garage_area_mean) / garage_area_sd
+df_sl_test$total_area <- (df_sl_test$total_area - total_area_mean) / total_area_sd
+
+encoding <- df_sl_train %>% group_by(Neighborhood) %>%
+  summarize(Neighborhood_mean = mean(Sale_Price))
+
+df_sl_train <- df_sl_train %>% left_join(encoding, by = "Neighborhood")
+df_sl_test <- df_sl_test %>% left_join(encoding, by = "Neighborhood")
+```
+
+
+```{r}
+model_2 <- lmer(lg_SalePrice ~ (1|Utilities) + Bsmt_Cond + Bsmt_Exposure + 
+                  Bsmt_Qual + Central_Air + Exter_Cond + 
+                  Exter_Qual + Exterior_1st + 
+                  Fireplace_Qu + Foundation + Garage_Cond + Garage_Qual + Garage_Type + Heating_QC + 
+                  Kitchen_Qual + Lot_Config + Lot_Shape + Mas_Vnr_Area + 
+                  Neighborhood + Roof_Style + Sale_Condition + 
+                  (1 | MS_SubClass) + (Longitude |MS_Zoning) + 
+                  Year_Remod_Add +  Fireplaces + 
+                  First_Flr_SF + Full_Bath + Garage_Area + 
+                  Half_Bath + Kitchen_AbvGr + 
+                  Total_Bsmt_SF + TotRms_AbvGrd + year_gap + total_area + Mo_Sold, 
+                data = df_sl_train)
+summary(model_2)
+```
+
+```{r}
+library(car)
+vif(model_2) 
+```
+```{r}
+model_3 <- lm(lg_SalePrice ~ Utilities + Bsmt_Exposure + 
+                  Bsmt_Qual + Central_Air + Exter_Cond + 
+                  Exter_Qual + Exterior_1st + 
+                  Fireplace_Qu + Foundation + Garage_Cond + Garage_Finish + 
+                  Garage_Qual + Garage_Type + Heating_QC + 
+                  Kitchen_Qual + Lot_Config + Lot_Shape + Mas_Vnr_Area + 
+                  MS_SubClass + MS_Zoning + Neighborhood + 
+                  Roof_Style + Sale_Condition + Sale_Type + 
+                  Year_Remod_Add + Fireplaces + 
+                  First_Flr_SF + Full_Bath + Garage_Area + 
+                  Half_Bath + Kitchen_AbvGr + Longitude + 
+                  Total_Bsmt_SF + TotRms_AbvGrd + year_gap + total_area + Mo_Sold, 
+                data = df_sl_train)
+summary(model_3)
+```
+```{r}
+model_4 <- lmer(
+  lg_SalePrice ~ (1 | Utilities) + Bsmt_Cond + Bsmt_Exposure + 
+                  Bsmt_Qual + Central_Air + Exter_Cond + Exter_Qual + Exterior_1st +  
+                  Fireplace_Qu + Foundation + Garage_Cond + Garage_Qual + Garage_Type +  
+                  Heating_QC + Kitchen_Qual + Lot_Config + Lot_Shape + Mas_Vnr_Area +  
+                  Neighborhood + Roof_Style + Sale_Condition + (1 | MS_SubClass) +  
+                  Year_Remod_Add + Fireplaces + First_Flr_SF +  
+                  Full_Bath + Garage_Area + Half_Bath + Kitchen_AbvGr + Total_Bsmt_SF +  
+                  TotRms_AbvGrd + year_gap + total_area + Mo_Sold, 
+  data = df_sl_train,
+  control = lmerControl(optimizer = "bobyqa")
+)
+
+summary(model_4)
+```
+```{r}
+model_5 <- lm(
+  lg_SalePrice ~  Utilities + Bsmt_Exposure + Foundation:MS_SubClass + 
+                  Bsmt_Qual + Central_Air + Exter_Cond + Exter_Qual + Exterior_1st +  
+                  Fireplace_Qu +  Garage_Cond + Garage_Qual + Garage_Cars:Garage_Type +  
+                  Heating_QC + Kitchen_Qual + Lot_Config + Lot_Shape + Mas_Vnr_Area +  
+                  Neighborhood + Roof_Style + Sale_Condition + MS_SubClass +  
+                  Year_Remod_Add + Fireplaces + First_Flr_SF +  
+                  Full_Bath + Garage_Area + Half_Bath + Kitchen_AbvGr + Total_Bsmt_SF +  
+                  TotRms_AbvGrd + year_gap + total_area + Mo_Sold, 
+  data = df_sl_train
+)
+
+summary(model_5)
+```
+
+```{r, warning = FALSE}
+
+
+```
+```{r}
+model_6 <- lmer(
+  lg_SalePrice ~  Utilities + Bsmt_Exposure + (Foundation | MS_SubClass) + 
+                  Bsmt_Qual + Central_Air + Exter_Cond + Exter_Qual +   
+                  Fireplace_Qu +  Garage_Cond + Garage_Qual + (Garage_Cars|Garage_Type) +  
+                  Heating_QC + Kitchen_Qual + Lot_Config + Lot_Shape + Mas_Vnr_Area +  
+                  Neighborhood + Roof_Style + Sale_Condition + MS_SubClass +  
+                  Year_Remod_Add + Fireplaces + First_Flr_SF +  
+                  Full_Bath + Garage_Area + Half_Bath + Kitchen_AbvGr + Total_Bsmt_SF +  
+                  TotRms_AbvGrd + year_gap + Mo_Sold, 
+  data = df_sl_train
+)
+
+summary(model_6)
+vif(model_6)
+```
+```{r}
+residuals <- residuals(model_6)
+fitted_values <- fitted(model_6)
+
+plot(fitted_values, residuals,
+     xlab = "Fitted Values",
+     ylab = "Residuals",
+     main = "Residual Plot",
+     pch = 20,
+     col = "blue")
+abline(h = 0, lty = 2, col = "red")
+```
+
